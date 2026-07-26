@@ -55,17 +55,21 @@ public class MasterPasswordForm : Form
         MinimizeBox = false;
         ShowInTaskbar = false;
         AutoScaleMode = AutoScaleMode.Font;
-        ClientSize = new Size(320, _mode == MasterPasswordMode.Unlock ? 140 : 200);
+        // 窗体尺寸完全由内容(AutoSize)决定，而不是写死的 ClientSize——固定像素高度在
+        // Windows"更大文本"辅助功能设置或高 DPI 缩放下预留量不够，会裁剪/重叠控件。
+        AutoSize = true;
+        AutoSizeMode = AutoSizeMode.GrowAndShrink;
         Padding = new Padding(16);
 
         var layout = new TableLayoutPanel
         {
-            Dock = DockStyle.Fill,
+            Dock = DockStyle.Top,
             ColumnCount = 2,
             AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
         };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 90));
-        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 220));
 
         int row = 0;
 

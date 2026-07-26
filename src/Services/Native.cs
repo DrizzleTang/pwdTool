@@ -58,10 +58,29 @@ internal static class Native
         public InputUnion U;
     }
 
+    /// <summary>
+    /// 必须完整声明 MOUSEINPUT/KEYBDINPUT/HARDWAREINPUT 三个成员，联合体大小以最大成员
+    /// (MOUSEINPUT，x64 下 32 字节) 为准，这样 INPUT 整体大小才会与真实 Win32 定义一致
+    /// (x64 下 40 字节)。此前只声明 ki 会让 Marshal.SizeOf 算出 32 字节，
+    /// 与系统期望的 cbSize 不符，SendInput 会直接失败（返回 0，不注入任何按键）。
+    /// </summary>
     [StructLayout(LayoutKind.Explicit)]
     public struct InputUnion
     {
+        [FieldOffset(0)] public MOUSEINPUT mi;
         [FieldOffset(0)] public KEYBDINPUT ki;
+        [FieldOffset(0)] public HARDWAREINPUT hi;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct MOUSEINPUT
+    {
+        public int dx;
+        public int dy;
+        public uint mouseData;
+        public uint dwFlags;
+        public uint time;
+        public IntPtr dwExtraInfo;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -72,6 +91,14 @@ internal static class Native
         public uint dwFlags;
         public uint time;
         public IntPtr dwExtraInfo;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct HARDWAREINPUT
+    {
+        public uint uMsg;
+        public ushort wParamL;
+        public ushort wParamH;
     }
 
     #endregion

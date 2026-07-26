@@ -22,6 +22,8 @@ Unicode true
 
 Name "PwdTool 密码管理器"
 OutFile "${OUT_FILE}"
+Icon "..\src\Assets\app.ico"
+UninstallIcon "..\src\Assets\app.ico"
 InstallDir "$LOCALAPPDATA\Programs\PwdTool"
 InstallDirRegKey HKCU "Software\PwdTool" "InstallDir"
 RequestExecutionLevel user   ; 安装到当前用户目录，无需管理员权限
@@ -33,7 +35,10 @@ SetCompressor zlib
 
 ; ---- 现代 UI ----
 !include "MUI2.nsh"
+!include "LogicLib.nsh"
 
+!define MUI_ICON "..\src\Assets\app.ico"
+!define MUI_UNICON "..\src\Assets\app.ico"
 !define MUI_ABORTWARNING
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY
@@ -51,8 +56,17 @@ Section "PwdTool 主程序" SecMain
   SectionIn RO
   SetOutPath "$INSTDIR"
 
-  ; 安装前先尝试结束正在运行的旧实例，避免单文件被占用导致覆盖失败
+  ; 安装前先尝试结束正在运行的旧实例，避免单文件被占用导致覆盖失败。
+  ; taskkill 返回 0=已结束、128=本来就没在运行，这两种都是正常情况；
+  ; 其它返回码（例如权限不足）给出针对性提示，而不是让用户对接下来
+  ; 可能出现的"文件被占用"系统对话框摸不着头脑。
   ExecWait 'taskkill /IM PwdTool.exe /F' $0
+  ${If} $0 != 0
+  ${AndIf} $0 != 128
+    MessageBox MB_OK|MB_ICONEXCLAMATION \
+      "检测到 PwdTool 可能正在运行，且未能自动将其关闭（taskkill 返回码 $0）。$\r$\n\
+如果接下来复制文件时提示被占用，请先手动从系统托盘退出 PwdTool 后重新运行本安装程序。"
+  ${EndIf}
 
   File "${PUBLISH_DIR}\PwdTool.exe"
   File "${PUBLISH_DIR}\使用说明.txt"
@@ -67,6 +81,7 @@ Section "PwdTool 主程序" SecMain
 
   ; 添加/删除程序 里的卸载条目
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\PwdTool" "DisplayName" "PwdTool 密码管理器"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\PwdTool" "DisplayIcon" "$INSTDIR\PwdTool.exe,0"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\PwdTool" "UninstallString" "$INSTDIR\Uninstall.exe"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\PwdTool" "InstallLocation" "$INSTDIR"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\PwdTool" "DisplayVersion" "${APP_VERSION}"
@@ -83,6 +98,12 @@ SectionEnd
 
 Section "Uninstall"
   ExecWait 'taskkill /IM PwdTool.exe /F' $0
+  ${If} $0 != 0
+  ${AndIf} $0 != 128
+    MessageBox MB_OK|MB_ICONEXCLAMATION \
+      "检测到 PwdTool 可能正在运行，且未能自动将其关闭（taskkill 返回码 $0）。$\r$\n\
+如果接下来删除文件时提示被占用，请先手动从系统托盘退出 PwdTool 后重新运行卸载程序。"
+  ${EndIf}
 
   Delete "$INSTDIR\PwdTool.exe"
   Delete "$INSTDIR\使用说明.txt"

@@ -77,6 +77,7 @@ public class PopupForm : Form
             int idx = _listBox.IndexFromPoint(e.Location);
             if (idx >= 0) _listBox.SelectedIndex = idx;
         };
+        _listBox.Paint += ListBox_PaintEmptyHint;
 
         Controls.Add(_listBox);
         Controls.Add(_searchBox);
@@ -142,6 +143,7 @@ public class PopupForm : Form
             _listBox.Items.Add(entry);
         }
         _listBox.EndUpdate();
+        _listBox.Invalidate(); // 确保"空列表提示"能在从有数据切到无数据时立即重绘
 
         if (_listBox.Items.Count > 0)
         {
@@ -201,20 +203,64 @@ public class PopupForm : Form
         Hide();
         _store.Touch(entry.Id);
 
-        bool didAutoFill = false;
         if (_settings.AutoFillEnabled && AutoTypeService.ActivateWindow(_targetWindow))
         {
-            // 给目标窗口一点时间真正拿到前台焦点后再注入按键。
-            System.Threading.Thread.Sleep(80);
-            AutoTypeService.TypeCredential(entry.Username, entry.Password);
-            didAutoFill = true;
+            // 用 Timer 而不是 Thread.Sleep 阻塞 UI 线程；给目标窗口一点时间真正拿到前台
+            // 焦点后，在 Tick 回调里二次确认前台窗口确实还是目标窗口，再注入按键，
+            // 避免这段等待期间焦点被其它系统事件抢走导致密码被打进错误的窗口。
+            var timer = new System.Windows.Forms.Timer { Interval = 80 };
+            timer.Tick += (_, _) =>
+            {
+                timer.Stop();
+                timer.Dispose();
+                CompleteAutoFillOrFallback(entry);
+            };
+            timer.Start();
         }
         else
         {
-            Clipboard.SetText(entry.Password);
+            ClipboardHelper.CopyPasswordWithAutoClear(entry.Password);
+            EntryChosen?.Invoke(entry, false);
+        }
+    }
+
+    private void CompleteAutoFillOrFallback(AccountEntry entry)
+    {
+        bool didAutoFill = false;
+
+        if (AutoTypeService.IsForeground(_targetWindow))
+        {
+            didAutoFill = AutoTypeService.TypeCredential(entry.Username, entry.Password);
+        }
+
+        if (!didAutoFill)
+        {
+            ClipboardHelper.CopyPasswordWithAutoClear(entry.Password);
         }
 
         EntryChosen?.Invoke(entry, didAutoFill);
+    }
+
+    /// <summary>账号库为空或搜索无结果时，在空白列表中央画一行提示文字，避免用户误以为程序无响应。</summary>
+    private void ListBox_PaintEmptyHint(object? sender, PaintEventArgs e)
+    {
+        if (_listBox.Items.Count > 0) return;
+
+        string text = string.IsNullOrWhiteSpace(_searchBox.Text)
+            ? "暂无账号，请在设置中新增或从浏览器导入"
+            : "未找到匹配的账号";
+
+        using var brush = new SolidBrush(Color.Gray);
+        var size = e.Graphics.MeasureString(text, _listBox.Font);
+        e.Graphics.DrawString(text, _listBox.Font, brush,
+            (_listBox.ClientSize.Width - size.Width) / 2, (_listBox.ClientSize.Height - size.Height) / 2);
+    }
+
+    /// <summary>根据背景亮度动态选择黑/白文字，保证选中项在任意用户自定义强调色下都可读。</summary>
+    private static Color GetReadableTextColor(Color background)
+    {
+        double luminance = (background.R * 299 + background.G * 587 + background.B * 114) / 1000.0;
+        return luminance >= 128 ? Color.Black : Color.White;
     }
 
     private void ListBox_DrawItem(object? sender, DrawItemEventArgs e)
@@ -225,8 +271,10 @@ public class PopupForm : Form
         var entry = _currentList[e.Index];
         bool selected = (e.State & DrawItemState.Selected) == DrawItemState.Selected;
         Color accent = Color.FromArgb(_settings.PopupAccentColorArgb);
-        Color fore = selected ? Color.White : Color.Black;
-        Color sub = selected ? Color.WhiteSmoke : Color.DimGray;
+        Color fore = selected ? GetReadableTextColor(accent) : Color.Black;
+        Color sub = selected
+            ? (fore == Color.Black ? Color.FromArgb(70, 70, 70) : Color.Gainsboro)
+            : Color.DimGray;
 
         using (var backBrush = new SolidBrush(selected ? accent : BackColor))
         {

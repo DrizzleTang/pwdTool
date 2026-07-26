@@ -13,6 +13,18 @@ publish/
 **/vault.dat
 **/settings.json
 
+## JetBrains Rider / ReSharper
+.idea/
+*.iml
+*.sln.DotSettings.user
+
+## VSCode（如需团队共享 launch.json/settings.json 可按需从此规则里排除）
+.vscode/
+
+## NuGet（本项目用 PackageReference，理论上不会产生，预防性忽略）
+*.nupkg
+packages/
+
 ## OS
 .DS_Store
 Thumbs.db

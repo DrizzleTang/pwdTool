@@ -24,7 +24,10 @@ public class EditEntryForm : Form
     public EditEntryForm(AccountEntry? existing = null)
     {
         _isNew = existing == null;
-        _original = existing ?? new AccountEntry();
+        // 克隆一份而不是直接持有调用方传入的实例：避免在用户点"确定"之前，编辑过程中的
+        // 每次赋值就已经原地修改了仍然存在于 _store.Entries 里的同一个对象，让"取消"
+        // 这个理应无副作用的操作变得不安全。
+        _original = existing?.Clone() ?? new AccountEntry();
         BuildUi();
         Fill();
     }

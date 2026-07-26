@@ -9,6 +9,7 @@
     <AssemblyName>PwdTool</AssemblyName>
     <RootNamespace>PwdTool</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
     <Version>1.0.0</Version>
     <!-- 生成单文件可执行程序时使用: dotnet publish -c Release -r win-x64 -->
 
@@ -23,6 +24,23 @@
     <!-- 允许在非 Windows 主机上构建/发布面向 Windows 的项目（交叉编译生成 win-x64 可执行文件用）。
          在 Windows 上构建时这个开关本就无影响。 -->
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
+
+    <!-- 项目里字符串比较统一用 OrdinalIgnoreCase，日期都按 UTC 处理，不依赖任何文化相关的
+         排序/格式化逻辑，开启 InvariantGlobalization 在这里是无风险的，可以减小自包含单文件
+         发布体积、加快启动速度。 -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+
+    <!-- 已开启 Nullable，但默认只是警告级别；配合当前没有 CI 的现状，容易在后续开发中悄悄
+         引入空引用警告而不自知。把可空性警告提升为编译错误，保证"0 警告 0 错误"这个当前
+         状态不会被后续改动悄悄破坏。 -->
+    <WarningsAsErrors>Nullable</WarningsAsErrors>
+
+    <!-- PublishTrimmed/PublishReadyToRun 经评估后暂不启用：项目虽已改用 System.Text.Json
+         源生成上下文(JsonContext.cs)降低了裁剪风险，但本仓库的开发环境是 Linux 沙箱、
+         无法在真实 Windows 上跑一遍发布产物验证裁剪后功能是否完好，贸然开启裁剪一旦出问题
+         (例如某个未被覆盖到的反射调用)会比"体积大一点"更糟。留给使用者在有 Windows
+         测试条件时自行评估开启：<PublishTrimmed>true</PublishTrimmed> +
+         <TrimMode>partial</TrimMode> + <PublishReadyToRun>true</PublishReadyToRun>。 -->
   </PropertyGroup>
 
   <ItemGroup>

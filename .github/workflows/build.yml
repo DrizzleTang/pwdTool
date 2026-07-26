@@ -1,0 +1,45 @@
+name: Build & Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    # PwdTool 是 Windows 专用应用（WinForms + DPAPI + Win32 P/Invoke），必须在
+    # windows-latest 上跑，这样单元测试里涉及 DPAPI 的用例（PasswordStoreTests）
+    # 也能真正执行，而不是像本地 Linux 开发环境那样被跳过。
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Restore
+        run: dotnet restore src/PwdTool.csproj
+
+      - name: Build (Release)
+        run: dotnet build src/PwdTool.csproj -c Release --no-restore
+
+      - name: Test
+        run: dotnet test tests/PwdTool.Tests/PwdTool.Tests.csproj -c Release
+
+      - name: Publish self-contained single-file (win-x64)
+        run: >
+          dotnet publish src/PwdTool.csproj -c Release -r win-x64 --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true
+          -o publish/win-x64
+
+      - name: Upload publish artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PwdTool-win-x64
+          path: publish/win-x64/

@@ -16,6 +16,17 @@ public sealed class HotkeyManager : NativeWindow, IDisposable
 
     public event Action? HotkeyPressed;
 
+    /// <summary>当前热键组合是否已成功向系统注册（不代表"从未冲突"，只反映最近一次 Register 调用的结果）。</summary>
+    public bool IsRegistered => _registered;
+
+    /// <summary>
+    /// 临时抑制热键触发。全局热键的 WM_HOTKEY 消息是系统直接投递给这个隐藏窗口的，
+    /// 不受"当前是否有模态对话框在跑嵌套消息循环"影响——例如用户正在"编辑账号"/"设置主密码"
+    /// 这些模态对话框里操作时按下全局热键，仍然会弹出 PopupForm，造成界面状态交叠。
+    /// 打开这些模态对话框期间把这个开关置为 true 即可临时屏蔽，对话框关闭后记得复原。
+    /// </summary>
+    public bool Suppressed { get; set; }
+
     public HotkeyManager()
     {
         // 创建一个没有窗口样式、不可见的消息窗口，仅用来接收 WM_HOTKEY。
@@ -51,7 +62,7 @@ public sealed class HotkeyManager : NativeWindow, IDisposable
 
     protected override void WndProc(ref Message m)
     {
-        if (m.Msg == Native.WM_HOTKEY && m.WParam.ToInt32() == HotkeyId)
+        if (!Suppressed && m.Msg == Native.WM_HOTKEY && m.WParam.ToInt32() == HotkeyId)
         {
             HotkeyPressed?.Invoke();
         }

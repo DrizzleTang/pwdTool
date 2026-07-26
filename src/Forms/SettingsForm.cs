@@ -17,6 +17,7 @@ public class SettingsForm : Form
 
     // 账号管理
     private ListView _listView = null!;
+    private FlowLayoutPanel _accountToolbar = null!;
 
     // 外观
     private NumericUpDown _numWidth = null!;
@@ -31,6 +32,7 @@ public class SettingsForm : Form
     private CheckBox _chkAutoStart = null!;
     private TextBox _txtHotkey = null!;
     private Label _lblHotkeyError = null!;
+    private Label _lblHotkeyStatus = null!;
     private uint _pendingModifiers;
     private uint _pendingKeyCode;
 
@@ -66,7 +68,7 @@ public class SettingsForm : Form
         ClientSize = new Size(560, 480);
         MinimumSize = new Size(560, 480);
         ShowInTaskbar = true;
-        Icon = SystemIcons.Application;
+        Icon = AppIconProvider.Load();
 
         var tabs = new TabControl { Dock = DockStyle.Fill };
         tabs.TabPages.Add(BuildAccountsTab());
@@ -93,6 +95,24 @@ public class SettingsForm : Form
         Controls.Add(bottomPanel);
 
         FormClosing += SettingsForm_FormClosing;
+    }
+
+    /// <summary>
+    /// 弹出模态对话框（EditEntryForm/MasterPasswordForm/OpenFileDialog/ColorDialog 等）期间
+    /// 临时抑制全局热键——嵌套消息循环下 WM_HOTKEY 仍会被系统投递给 HotkeyManager 的隐藏窗口，
+    /// 若不抑制，用户在这些对话框里操作时按下全局热键仍会弹出 PopupForm，造成界面状态交叠。
+    /// </summary>
+    private DialogResult ShowModalSuppressingHotkey(Func<DialogResult> showDialog)
+    {
+        _hotkeyManager.Suppressed = true;
+        try
+        {
+            return showDialog();
+        }
+        finally
+        {
+            _hotkeyManager.Suppressed = false;
+        }
     }
 
     private void SettingsForm_FormClosing(object? sender, FormClosingEventArgs e)
@@ -143,12 +163,13 @@ public class SettingsForm : Form
         btnImportEdge.Click += (_, _) => ImportFromBrowser(ChromiumBrowser.Edge);
         btnImportCsv.Click += (_, _) => ImportFromCsv();
 
-        var toolbar = new FlowLayoutPanel
+        _accountToolbar = new FlowLayoutPanel
         {
             Dock = DockStyle.Top,
             Height = 76,
             Padding = new Padding(4),
         };
+        var toolbar = _accountToolbar;
         toolbar.Controls.Add(btnAdd);
         toolbar.Controls.Add(btnEdit);
         toolbar.Controls.Add(btnDelete);
@@ -197,7 +218,7 @@ public class SettingsForm : Form
     private void AddEntry()
     {
         using var dlg = new EditEntryForm();
-        if (dlg.ShowDialog(this) == DialogResult.OK)
+        if (ShowModalSuppressingHotkey(() => dlg.ShowDialog(this)) == DialogResult.OK)
         {
             _store.Add(dlg.Result);
             ReloadAccountList();
@@ -210,7 +231,7 @@ public class SettingsForm : Form
         if (entry == null) return;
 
         using var dlg = new EditEntryForm(entry);
-        if (dlg.ShowDialog(this) == DialogResult.OK)
+        if (ShowModalSuppressingHotkey(() => dlg.ShowDialog(this)) == DialogResult.OK)
         {
             _store.Update(dlg.Result);
             ReloadAccountList();
@@ -235,48 +256,72 @@ public class SettingsForm : Form
     {
         var entry = GetSelectedEntry();
         if (entry == null) return;
-        Clipboard.SetText(entry.Password);
+        ClipboardHelper.CopyPasswordWithAutoClear(entry.Password);
     }
 
-    private void ImportFromBrowser(ChromiumBrowser browser)
+    /// <summary>导入期间禁用账号管理工具栏并显示等待光标，避免解密/解析耗时较长时界面看起来像假死。</summary>
+    private void SetImportBusy(bool busy)
     {
-        var result = BrowserImporter.ImportFromChromium(browser);
-        int added = _store.ImportMany(result.Entries);
-        ReloadAccountList();
-
-        string msg = $"成功导入 {added} 条账号。";
-        if (result.SkippedNewFormat > 0)
-        {
-            msg += $"\n另有 {result.SkippedNewFormat} 条使用新版 App-Bound Encryption 加密，无法直接解密，" +
-                   "请在浏览器中导出密码 CSV 后使用「从 CSV 导入」补全。";
-        }
-        if (!string.IsNullOrEmpty(result.Error))
-        {
-            msg += $"\n提示：{result.Error}";
-        }
-
-        MessageBox.Show(this, msg, "导入结果", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        UseWaitCursor = busy;
+        _accountToolbar.Enabled = !busy;
     }
 
-    private void ImportFromCsv()
+    private async void ImportFromBrowser(ChromiumBrowser browser)
+    {
+        SetImportBusy(true);
+        try
+        {
+            // 浏览器数据库解析 + DPAPI/AES-GCM 解密放到后台线程，避免阻塞 UI 消息泵。
+            var result = await Task.Run(() => BrowserImporter.ImportFromChromium(browser));
+            int added = _store.ImportMany(result.Entries);
+            ReloadAccountList();
+
+            string msg = $"成功导入 {added} 条账号。";
+            if (result.SkippedNewFormat > 0)
+            {
+                msg += $"\n另有 {result.SkippedNewFormat} 条使用新版 App-Bound Encryption 加密，无法直接解密，" +
+                       "请在浏览器中导出密码 CSV 后使用「从 CSV 导入」补全。";
+            }
+            if (!string.IsNullOrEmpty(result.Error))
+            {
+                msg += $"\n提示：{result.Error}";
+            }
+
+            MessageBox.Show(this, msg, "导入结果", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        finally
+        {
+            SetImportBusy(false);
+        }
+    }
+
+    private async void ImportFromCsv()
     {
         using var dlg = new OpenFileDialog
         {
             Title = "选择浏览器导出的密码 CSV 文件",
             Filter = "CSV 文件 (*.csv)|*.csv|所有文件 (*.*)|*.*",
         };
-        if (dlg.ShowDialog(this) != DialogResult.OK) return;
+        if (ShowModalSuppressingHotkey(() => dlg.ShowDialog(this)) != DialogResult.OK) return;
 
-        var result = BrowserImporter.ImportFromCsv(dlg.FileName);
-        if (!string.IsNullOrEmpty(result.Error) && result.Entries.Count == 0)
+        SetImportBusy(true);
+        try
         {
-            MessageBox.Show(this, "导入失败：" + result.Error, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            return;
-        }
+            var result = await Task.Run(() => BrowserImporter.ImportFromCsv(dlg.FileName));
+            if (!string.IsNullOrEmpty(result.Error) && result.Entries.Count == 0)
+            {
+                MessageBox.Show(this, "导入失败：" + result.Error, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
 
-        int added = _store.ImportMany(result.Entries);
-        ReloadAccountList();
-        MessageBox.Show(this, $"成功导入 {added} 条账号。", "导入结果", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            int added = _store.ImportMany(result.Entries);
+            ReloadAccountList();
+            MessageBox.Show(this, $"成功导入 {added} 条账号。", "导入结果", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        finally
+        {
+            SetImportBusy(false);
+        }
     }
 
     #endregion
@@ -311,7 +356,7 @@ public class SettingsForm : Form
         btnBackColor.Click += (_, _) =>
         {
             using var cd = new ColorDialog { Color = _pendingBackColor };
-            if (cd.ShowDialog(this) == DialogResult.OK)
+            if (ShowModalSuppressingHotkey(() => cd.ShowDialog(this)) == DialogResult.OK)
             {
                 _pendingBackColor = cd.Color;
                 _backColorPreview.BackColor = cd.Color;
@@ -326,7 +371,7 @@ public class SettingsForm : Form
         btnAccentColor.Click += (_, _) =>
         {
             using var cd = new ColorDialog { Color = _pendingAccentColor };
-            if (cd.ShowDialog(this) == DialogResult.OK)
+            if (ShowModalSuppressingHotkey(() => cd.ShowDialog(this)) == DialogResult.OK)
             {
                 _pendingAccentColor = cd.Color;
                 _accentColorPreview.BackColor = cd.Color;
@@ -383,7 +428,16 @@ public class SettingsForm : Form
             Text = FormatHotkey(_pendingModifiers, _pendingKeyCode),
         };
         _txtHotkey.KeyDown += TxtHotkey_KeyDown;
-        layout.Controls.Add(_txtHotkey, 1, 2);
+
+        // 只回显保存过的组合键文本不代表它"当前真的注册成功"——启动时若与其它软件冲突，
+        // 只会有一次容易被系统通知设置吞掉的气泡提示；这里常驻展示当前实际生效状态。
+        _lblHotkeyStatus = new Label { AutoSize = true, Margin = new Padding(8, 6, 0, 0) };
+        UpdateHotkeyStatusLabel();
+
+        var hotkeyRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = Padding.Empty };
+        hotkeyRow.Controls.Add(_txtHotkey);
+        hotkeyRow.Controls.Add(_lblHotkeyStatus);
+        layout.Controls.Add(hotkeyRow, 1, 2);
 
         _lblHotkeyError = new Label { ForeColor = Color.Firebrick, AutoSize = true };
         layout.Controls.Add(new Label(), 0, 3);
@@ -432,6 +486,7 @@ public class SettingsForm : Form
                 ? "该快捷键已被其它程序占用，请更换组合。"
                 : $"注册热键失败（错误码 {win32Error}）。";
             _hotkeyManager.Register(_pendingModifiers, _pendingKeyCode, out _);
+            UpdateHotkeyStatusLabel();
             return;
         }
 
@@ -440,6 +495,13 @@ public class SettingsForm : Form
         _saved = false; // 热键已变更且尚未保存，关闭窗口时需还原为持久化的组合
         _lblHotkeyError.Text = string.Empty;
         _txtHotkey.Text = FormatHotkey(modifiers, vk);
+        UpdateHotkeyStatusLabel();
+    }
+
+    private void UpdateHotkeyStatusLabel()
+    {
+        _lblHotkeyStatus.Text = _hotkeyManager.IsRegistered ? "● 当前已生效" : "● 当前未生效（可能被其它程序占用）";
+        _lblHotkeyStatus.ForeColor = _hotkeyManager.IsRegistered ? Color.SeaGreen : Color.Firebrick;
     }
 
     private static string FormatHotkey(uint modifiers, uint vk)
@@ -505,7 +567,7 @@ public class SettingsForm : Form
         if (_chkMasterPassword.Checked && !_store.IsMasterPasswordEnabled)
         {
             using var dlg = new MasterPasswordForm(MasterPasswordMode.SetNew);
-            if (dlg.ShowDialog(this) == DialogResult.OK)
+            if (ShowModalSuppressingHotkey(() => dlg.ShowDialog(this)) == DialogResult.OK)
             {
                 try
                 {
@@ -536,8 +598,23 @@ public class SettingsForm : Form
 
             if (confirm == DialogResult.Yes)
             {
-                _store.DisableMasterPassword(_settings);
-                _settings.Save();
+                try
+                {
+                    _store.DisableMasterPassword(_settings);
+                    _settings.Save();
+                }
+                catch (Exception ex)
+                {
+                    // 此前这里完全没有 try/catch，Enable/Change 分支都有——不对称的错误处理，
+                    // 一旦 DisableMasterPassword 内部落盘失败就会变成未处理异常。现在与另外
+                    // 两个分支保持一致：提示错误，并把复选框恢复为"仍然启用"，因为
+                    // DisableMasterPassword 采用"先落盘成功再提交状态"的事务式写法，
+                    // 抛异常时 IsMasterPasswordEnabled 必然还是 true，界面理应保持一致。
+                    MessageBox.Show(this, "关闭主密码失败：" + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    _chkMasterPassword.CheckedChanged -= ChkMasterPassword_CheckedChanged;
+                    _chkMasterPassword.Checked = true;
+                    _chkMasterPassword.CheckedChanged += ChkMasterPassword_CheckedChanged;
+                }
             }
             else
             {
@@ -555,11 +632,15 @@ public class SettingsForm : Form
         using var dlg = new MasterPasswordForm(MasterPasswordMode.Change,
             pwd => PasswordStore.VerifyMasterPassword(pwd, _settings));
 
-        if (dlg.ShowDialog(this) != DialogResult.OK) return;
+        if (ShowModalSuppressingHotkey(() => dlg.ShowDialog(this)) != DialogResult.OK) return;
 
         try
         {
-            _store.ChangeMasterPassword(dlg.OldPasswordInput, dlg.NewPasswordInput, _settings);
+            // MasterPasswordForm 在对话框内已经用 _unlockValidator 交互式校验过一次旧密码
+            // （给用户即时的"密码错误"反馈），这里传 true 告知 ChangeMasterPassword 不必
+            // 再重复一次同样的高成本 PBKDF2 派生校验。
+            _store.ChangeMasterPassword(dlg.OldPasswordInput, dlg.NewPasswordInput, _settings,
+                oldPasswordAlreadyVerified: true);
             _settings.Save();
             MessageBox.Show(this, "主密码已修改。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }

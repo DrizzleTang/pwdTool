@@ -52,6 +52,8 @@ public static class BrowserImporter
             return result;
         }
 
+        CleanupOrphanedTempFiles(); // 清理上次导入中途被强制终止后残留的临时解密文件
+
         byte[] masterKey;
         try
         {
@@ -72,9 +74,17 @@ public static class BrowserImporter
 
             // Login Data 在浏览器运行时被独占锁定，先复制一份到临时目录再打开。
             string tempCopy = Path.Combine(Path.GetTempPath(), $"PwdTool_{Guid.NewGuid():N}.db");
+            string tempCopyWal = tempCopy + "-wal";
+            string tempCopyShm = tempCopy + "-shm";
             try
             {
                 File.Copy(loginDataPath, tempCopy, overwrite: true);
+                // Chromium 默认以 WAL 模式访问 Login Data，最近写入的记录可能只存在于
+                // -wal（及 -shm）伴随文件里、尚未合并回主库；只复制主文件在浏览器仍在运行时
+                // 可能读不到最近新增/修改的密码。一并复制这两个伴随文件（若存在），
+                // SQLite 打开 tempCopy 时会按命名约定自动识别并合并。
+                CopyIfExists(loginDataPath + "-wal", tempCopyWal);
+                CopyIfExists(loginDataPath + "-shm", tempCopyShm);
 
                 using var conn = new SqliteConnection($"Data Source={tempCopy};Mode=ReadOnly;");
                 conn.Open();
@@ -112,6 +122,8 @@ public static class BrowserImporter
             finally
             {
                 TryDeleteFile(tempCopy);
+                TryDeleteFile(tempCopyWal);
+                TryDeleteFile(tempCopyShm);
             }
         }
 
@@ -233,6 +245,39 @@ public static class BrowserImporter
         catch
         {
             // 临时文件删除失败不影响导入结果，忽略。
+        }
+    }
+
+    private static void CopyIfExists(string sourcePath, string destPath)
+    {
+        try
+        {
+            if (File.Exists(sourcePath)) File.Copy(sourcePath, destPath, overwrite: true);
+        }
+        catch
+        {
+            // 复制伴随文件失败时退回只读主库，不影响主流程。
+        }
+    }
+
+    /// <summary>
+    /// 清理上次导入过程中若被强制结束进程（任务管理器杀进程/系统崩溃/断电）而残留在
+    /// %TEMP% 下的解密临时文件——正常路径下的 finally 块能覆盖绝大多数情况，
+    /// 这里作为兜底，在每次开始新的导入时顺手清一遍。
+    /// </summary>
+    private static void CleanupOrphanedTempFiles()
+    {
+        try
+        {
+            string tempDir = Path.GetTempPath();
+            foreach (var file in Directory.EnumerateFiles(tempDir, "PwdTool_*.db*"))
+            {
+                TryDeleteFile(file);
+            }
+        }
+        catch
+        {
+            // 清理失败不影响本次导入，忽略。
         }
     }
 

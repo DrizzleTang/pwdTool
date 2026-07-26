@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- 与主项目保持同一 TFM：被测的 AccountEntry/BrowserImporter/PasswordStore 等类型
+         都定义在 net8.0-windows 的 PwdTool 项目里，测试项目必须匹配才能引用。
+         纯逻辑测试（标签解析/排序权重/CSV 解析）在任意平台都能跑；涉及 DPAPI 的用例
+         （见 PasswordStoreTests）内部会在非 Windows 环境下自行跳过，详见该文件注释。 -->
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <UseWindowsForms>true</UseWindowsForms>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\PwdTool.csproj" />
+  </ItemGroup>
+
+</Project>

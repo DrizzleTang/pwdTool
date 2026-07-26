@@ -25,7 +25,22 @@ public class TrayAppContext : ApplicationContext
     /// </summary>
     public static TrayAppContext? TryCreate()
     {
-        var settings = AppSettings.Load();
+        AppSettings settings;
+        try
+        {
+            settings = AppSettings.Load();
+        }
+        catch (SettingsCorruptedException ex)
+        {
+            MessageBox.Show(ex.Message, "设置文件异常", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            settings = new AppSettings();
+        }
+
+        // 开机自启的真实状态以注册表为准，而不是只信任上次保存的 settings.json——
+        // 例如通过安装程序的"开机自启动"选项勾选、或手动编辑过注册表，都会导致
+        // settings.json 里的缓存值与实际状态不一致，这里启动时校正一次。
+        settings.AutoStartEnabled = AutoStartManager.IsEnabled();
+
         var store = new PasswordStore();
 
         if (!Unlock(store, settings))
@@ -79,7 +94,7 @@ public class TrayAppContext : ApplicationContext
 
         _trayIcon = new NotifyIcon
         {
-            Icon = SystemIcons.Application, // 简易实现使用系统图标；打包发布时可替换为自定义 .ico
+            Icon = AppIconProvider.Load(),
             Text = "PwdTool 密码管理",
             Visible = true,
             ContextMenuStrip = BuildContextMenu(),
@@ -160,13 +175,26 @@ public class TrayAppContext : ApplicationContext
         ExitThread(); // 触发 ApplicationContext.ThreadExit -> Cleanup()
     }
 
+    private bool _cleanedUp;
+
+    /// <summary>
+    /// 幂等：目前唯一触发路径是托盘菜单"退出"，但 NotifyIcon.Dispose() 本身没有重复调用保护，
+    /// 一旦未来增加新的退出入口（例如系统会话结束事件）导致这里被调用两次，会有抛异常风险，
+    /// 加一个幂等标志位作为低成本的防御性加固。
+    /// </summary>
     private void Cleanup()
     {
+        if (_cleanedUp) return;
+        _cleanedUp = true;
+
         _hotkeyManager.Unregister();
         _hotkeyManager.Dispose();
         _store.Lock();
 
         _trayIcon.Visible = false;
         _trayIcon.Dispose();
+
+        _popupForm.Dispose();
+        _settingsForm?.Dispose();
     }
 }

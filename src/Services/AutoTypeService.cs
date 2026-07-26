@@ -30,9 +30,20 @@ public static class AutoTypeService
     }
 
     /// <summary>
-    /// 依次输入：用户名 → Tab → 密码 → （可选）回车。
+    /// 二次校验：调用方在 <see cref="ActivateWindow"/> 之后、真正注入按键之前应该用这个方法
+    /// 确认目标窗口"确实"已经拿到前台焦点（SetForegroundWindow 的返回值并不足以保证这一点，
+    /// 系统前台锁定/目标进程无响应/其它窗口抢占焦点等情况都可能导致实际前台窗口与目标不符）。
+    /// 校验不通过时调用方应放弃自动填写，回退为复制密码到剪贴板，避免把密码误注入到
+    /// 用户当时实际正在操作的其它窗口。
     /// </summary>
-    public static void TypeCredential(string username, string password, bool pressEnterAfter = false)
+    public static bool IsForeground(IntPtr hWnd) => hWnd != IntPtr.Zero && Native.GetForegroundWindow() == hWnd;
+
+    /// <summary>
+    /// 依次输入：用户名 → Tab → 密码 → （可选）回车。返回 SendInput 是否把全部按键事件都成功
+    /// 提交给系统（并不代表目标应用一定"看到"了这些按键，但至少排除了 cbSize 不匹配等
+    /// 会导致系统层面直接拒绝的情况）。
+    /// </summary>
+    public static bool TypeCredential(string username, string password, bool pressEnterAfter = false)
     {
         var inputs = new List<Native.INPUT>();
         AppendText(inputs, username);
@@ -43,15 +54,15 @@ public static class AutoTypeService
             AppendKey(inputs, Native.VK_RETURN);
         }
 
-        SendAll(inputs);
+        return SendAll(inputs);
     }
 
-    /// <summary>仅输入一段文本（例如只填密码）。</summary>
-    public static void TypeText(string text)
+    /// <summary>仅输入一段文本（例如只填密码）。返回是否成功提交给系统。</summary>
+    public static bool TypeText(string text)
     {
         var inputs = new List<Native.INPUT>();
         AppendText(inputs, text);
-        SendAll(inputs);
+        return SendAll(inputs);
     }
 
     private static void AppendText(List<Native.INPUT> inputs, string text)
@@ -107,12 +118,20 @@ public static class AutoTypeService
         };
     }
 
-    private static void SendAll(List<Native.INPUT> inputs)
+    /// <summary>INPUT 结构体大小只与进程位数有关，不会随调用变化，缓存一次即可。</summary>
+    private static readonly int InputSize = Marshal.SizeOf<Native.INPUT>();
+
+    /// <summary>
+    /// 发送全部输入事件。SendInput 的返回值是"系统实际接受了多少个事件"，
+    /// 与请求数量不符（包括返回 0，例如 cbSize 与系统认知不一致、或注入被 UIPI 拒绝）
+    /// 都视为失败，调用方应据此回退为复制到剪贴板，而不是想当然地认为已经成功。
+    /// </summary>
+    private static bool SendAll(List<Native.INPUT> inputs)
     {
-        if (inputs.Count == 0) return;
+        if (inputs.Count == 0) return true;
 
         var arr = inputs.ToArray();
-        int size = Marshal.SizeOf(typeof(Native.INPUT));
-        Native.SendInput((uint)arr.Length, arr, size);
+        uint sent = Native.SendInput((uint)arr.Length, arr, InputSize);
+        return sent == arr.Length;
     }
 }

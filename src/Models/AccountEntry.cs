@@ -42,7 +42,7 @@ public class AccountEntry
     public string TagsDisplay
     {
         get => string.Join(", ", Tags);
-        set => Tags = value
+        set => Tags = (value ?? string.Empty)
             .Split(new[] { ',', '，', '、' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -60,18 +60,53 @@ public class AccountEntry
         }
     }
 
-    /// <summary>综合排序权重：近期使用优先，其次使用频次。</summary>
+    /// <summary>
+    /// 综合排序权重：近期使用优先，其次使用频次。
+    /// 与早期版本"距今分钟数的无界线性衰减"不同，这里 recency 部分改为指数衰减
+    /// （半衰期 72 小时），结果恒在 (0,1] 之间，不会无限变负——旧公式下，用过 1 次的账号
+    /// 只要距上次使用超过约 42 分钟，分数就会跌破"从未使用过的新账号"（恒为 0），导致高频
+    /// 老账号被刚新增但从未使用的账号顶掉，这是一个真实的排序 bug。现在从未使用过的账号
+    /// 统一给一个低于任何"用过的账号"的常数分值（-1），保证只要用过一次就不会被反超。
+    /// </summary>
     [JsonIgnore]
     public double RecencyScore
     {
         get
         {
-            // 越近使用分值越高，再叠加使用频次的对数权重。
-            double recency = LastUsedUtc == DateTime.MinValue
-                ? 0
-                : -(DateTime.UtcNow - LastUsedUtc).TotalMinutes;
-            double frequency = Math.Log(UseCount + 1) * 60; // 频次换算成"分钟"权重
-            return recency + frequency;
+            if (UseCount <= 0)
+            {
+                return -1;
+            }
+
+            const double HalfLifeHours = 72.0;
+            double elapsedHours = Math.Max(0, (DateTime.UtcNow - LastUsedUtc).TotalHours);
+            double recencyFactor = Math.Pow(0.5, elapsedHours / HalfLifeHours); // (0,1]
+            double frequencyScore = Math.Log(UseCount + 1);
+
+            return frequencyScore + recencyFactor;
         }
     }
+
+    /// <summary>供屏幕阅读器等无障碍工具朗读，以及调试/日志展示；ListBox 自绘条目也依赖它作为兜底。</summary>
+    public override string ToString() => DisplayName;
+
+    /// <summary>
+    /// 浅拷贝一份完全独立的副本（含 Tags 列表本身也是新分配的，避免共享引用）。
+    /// 用于编辑对话框：如果直接把 _store.Entries 里的同一个对象实例交给编辑窗口，
+    /// 用户在对话框里还没点"确定"就已经原地修改了仍存在于账号库列表中的字段，
+    /// "取消"按钮这个语义上应该无副作用的操作实际上并不安全。
+    /// </summary>
+    public AccountEntry Clone() => new()
+    {
+        Id = Id,
+        Title = Title,
+        Url = Url,
+        Username = Username,
+        Password = Password,
+        UseCount = UseCount,
+        LastUsedUtc = LastUsedUtc,
+        CreatedUtc = CreatedUtc,
+        Source = Source,
+        Tags = new List<string>(Tags),
+    };
 }
