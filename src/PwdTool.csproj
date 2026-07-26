@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>PwdTool</AssemblyName>
+    <RootNamespace>PwdTool</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Version>1.0.0</Version>
+    <!-- 生成单文件可执行程序时使用: dotnet publish -c Release -r win-x64 -->
+
+    <!-- 与 app.manifest 中的 dpiAwareness=PerMonitorV2 保持一致声明；
+         真正生效的是 manifest（进程启动前由系统读取），这里显式写出只是为了避免歧义，
+         ApplicationConfiguration.Initialize() 生成的 Application.SetHighDpiMode 调用
+         在 manifest 已声明的情况下会被系统忽略，不会产生冲突。 -->
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <ApplicationVisualStyles>true</ApplicationVisualStyles>
+    <ApplicationUseCompatibleTextRendering>false</ApplicationUseCompatibleTextRendering>
+
+    <!-- 允许在非 Windows 主机上构建/发布面向 Windows 的项目（交叉编译生成 win-x64 可执行文件用）。
+         在 Windows 上构建时这个开关本就无影响。 -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 用于读取 Chrome/Edge 的 Login Data (SQLite) -->
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.7" />
+    <!-- DPAPI 数据保护 (ProtectedData) -->
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
+  </ItemGroup>
+
+</Project>
