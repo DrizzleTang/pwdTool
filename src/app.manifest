@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<assembly manifest xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
-  <assemblyIdentity version="1.0.0.0" name="PwdTool.app" />
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <assemblyIdentity version="1.0.0.0" name="PwdTool.app" type="win32" />
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
     <security>
       <requestedPrivileges xmlns="urn:schemas-microsoft-com:asm.v3">
@@ -9,11 +9,18 @@
       </requestedPrivileges>
     </security>
   </trustInfo>
-  <application xmlns="urn:schemas-microsoft-com:asm.v3">
-    <windowsSettings>
-      <!-- 高 DPI 感知，保证弹窗定位在鼠标位置准确 -->
-      <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware>
-      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness>
-    </windowsSettings>
-  </application>
+  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+    <application>
+      <!-- 声明兼容 Windows 10/11，让系统按现代行为加载 -->
+      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}" />
+    </application>
+  </compatibility>
+  <!-- 注意：这里故意不手写 <application>/<windowsSettings>/dpiAware 声明。当项目通过
+       <ApplicationManifest> 指定了自定义清单文件时，SDK 会把这个文件原样嵌入、不会再
+       把 <ApplicationHighDpiMode> 属性合并进来（曾用两者都设导致过一次可复现的 XML
+       语法错误、进而让 exe 完全无法启动的教训）。DPI 感知(PerMonitorV2)改为完全交给
+       csproj 里的 <ApplicationHighDpiMode> 属性驱动——它会让 SDK 生成的
+       Program.cs 里 ApplicationConfiguration.Initialize() 在创建任何窗口之前调用
+       Application.SetHighDpiMode(PerMonitorV2)，这正是 `dotnet new winforms` 官方模板
+       的标准做法，同样在窗口创建前生效，且不需要手写任何清单 XML。 -->
 </assembly>
